@@ -1,0 +1,166 @@
+;;; ---------------------------------------------------------------------------
+;;; Re-implementation of SHA1 in LLL
+;;; Based on https://github.com/Arachnid/solsha1
+;;;
+;;; Ben Edgington - ben@benjaminion.xyz
+;;;
+;;; Compiler version: 0.4.18 or above. Needs to support the switch expression.
+
+(seq
+
+  ;; Precomputed function ID: sha1(bytes)
+  (def 'func-sha1 0x1605782b)
+
+  ;; Memory layout.
+  ;; First 0x148 bytes are reserved for work space
+  (def '_func     0x160)
+  (def '_len      0x160) ; No conflict so re-use.
+  (def '_data     0x180)
+  (def '_totallen 0x1a0)
+  (def '_h        0x1c0)
+  (def '_i        0x1e0)
+  (def '_j        0x200)
+  (def '_t        0x220)
+  (def '_x        0x240)
+  (def '_f        0x260)
+  (def '_k        0x280)
+
+  ;; Add n to the memory location mem
+  (def 'inc (mem n) [mem]:(+ @mem n))
+
+  ;; Retrieve the memory word n places before m
+  (def 'offneg(m n) @(- @m n))
+
+  ;; In view of the coming SHL and SHR EVM opcodes (EIP-145), the current
+  ;; shl and shr compiler macros are problematic (inverted operands).
+  ;; Temporarily override the macros here.
+  ;; This can be removed after EIP-145 is deployed for a big speed-up.
+  (def 'shl (shift val) (mul val (exp 2 shift)))
+  (def 'shr (shift val) (div val (exp 2 shift)))
+
+  ;; Will revert if sent any Ether. We use the macro immediately so as
+  ;;   to abort if sent any Ether during contract deployment.
+  (def 'not-payable
+    (when (callvalue) (revert 0 0)))
+
+  not-payable
+
+  (returnlll
+    (seq not-payable
+
+      ;; func is initialised to 0, so this is safe
+      (calldatacopy (+ _func 28) 0x00 4)
+
+      (unless (= func-sha1 @_func)
+        (revert 0 0))
+
+      (seq
+
+        ;; Get the data length, and point data at the first byte
+        [_data]:(+ (calldataload 4) 4)
+        [_len]:(calldataload @_data)
+        (inc _data 32)
+
+        ;; Find the length after padding
+        [_totallen]:(+ (and (+ @_len 1) 0xFFFFFFFFFFFFFFC0) 64)
+        (when (< (- @_totallen @_len) 9)
+          (inc _totallen 64))
+
+        [_h]:0x6745230100EFCDAB890098BADCFE001032547600C3D2E1F0
+
+        (for [_i]:0 (< @_i @_totallen) (inc _i 64)
+          (seq
+
+            ;; Load 64 bytes of data
+            (calldatacopy 0 (+ @_data @_i) 64)
+
+            ;; If we loaded the last byte, store the terminator byte
+            (when (< (- @_len @_i) 64)
+              (mstore8 (- @_len @_i) 0x80))
+
+            ;; If this is the last block, store the length
+            (when (= @_i (- @_totallen 64))
+              [32]:(or @32 (* @_len 8)))
+
+            ;; Expand the 16 32-bit words into 80
+            ;; [actually, 328 bytes get written to - take care!]
+            (for [_j]:64 (< @_j 128) (inc _j 12)
+              (seq
+                [_t]:(^ (offneg _j 12) (offneg _j 32) (offneg _j 56) (offneg _j 64))
+                [@_j]:(or
+                       (and (* @_t 2) 0xFFFFFFFEFFFFFFFEFFFFFFFEFFFFFFFEFFFFFFFEFFFFFFFEFFFFFFFEFFFFFFFE)
+                       (and (shr 31 @_t) 0x0000000100000001000000010000000100000001000000010000000100000001))
+                ))
+
+            (for [_j]:128 (< @_j 320) (inc _j 24)
+              (seq
+                [_t]:(^ (offneg _j 24) (offneg _j 64) (offneg _j 112) (offneg _j 128))
+                [@_j]:(or
+                       (and (* @_t 4) 0xFFFFFFFCFFFFFFFCFFFFFFFCFFFFFFFCFFFFFFFCFFFFFFFCFFFFFFFCFFFFFFFC)
+                       (and (shr 30 @_t) 0x0000000300000003000000030000000300000003000000030000000300000003))
+                ))
+
+            [_x]:@_h
+
+            (for [_j]:0 (< @_j 80) (inc _j 1)
+              (seq
+                (switch
+
+                  (< @_j 20)
+                    ;; f = d xor (b and (c xor d))
+                    (seq
+                      [_f]:(xor
+                             (shr 40 @_x)
+                             (and
+                               (shr 120 @_x)
+                               (xor (shr 80 @_x) (shr 40 @_x))))
+                      [_k]:0x5A827999)
+
+                  (< @_j 40)
+                    ;; f = b xor c xor d
+                    (seq
+                      [_f]:(^ (shr 120 @_x) (shr 80 @_x) (shr 40 @_x))
+                      [_k]:0x6ED9EBA1)
+
+                  (< @_j 60)
+                    ;; f = (b and c) or (d and (b or c))
+                    (seq
+                      [_f]:(or
+                             (and (shr 120 @_x) (shr 80 @_x))
+                             (and
+                               (shr 40 @_x)
+                               (or (shr 120 @_x) (shr 80 @_x))))
+                      [_k]:0x8F1BBCDC)
+
+                  ;; Default branch, 60 <= j < 80: f = b xor c xor d
+                  (seq
+                    [_f]:(^ (shr 120 @_x) (shr 80 @_x) (shr 40 @_x))
+                    [_k]:0xCA62C1D6))
+
+                ;; temp = (a leftrotate 5) + f + e + k + w[i]
+                [_t]:(+
+                       (or
+                         (and (shr 155 @_x) 0xFFFFFFE0)
+                         (and (shr 187 @_x) 0x1F))
+                       @_f
+                       (and @_x 0xFFFFFFFF)
+                       @_k
+                       (shr 224 (mload (* @_j 4))))
+                [_x]:(or (shr 40 @_x) (shl 160 @_t))
+                [_x]:(or
+                       (and @_x 0xFFFFFFFF00FFFFFFFF000000000000FFFFFFFF00FFFFFFFF)
+                       (shl 80 (or (and (shr 50 @_x) 0xC0000000) (and (shr 82 @_x) 0x3FFFFFFF))))
+                ))
+
+            [_h]:(and (+ @_h @_x) 0xFFFFFFFF00FFFFFFFF00FFFFFFFF00FFFFFFFF00FFFFFFFF)
+
+            ))
+
+        [0]:(|
+              (and (shr 32 @_h) 0xFFFFFFFF00000000000000000000000000000000)
+              (and (shr 24 @_h) 0xFFFFFFFF000000000000000000000000)
+              (and (shr 16 @_h) 0xFFFFFFFF0000000000000000)
+              (and (shr 8 @_h) 0xFFFFFFFF00000000)
+              (and @_h 0xFFFFFFFF))
+
+        (return 12 20)))))
