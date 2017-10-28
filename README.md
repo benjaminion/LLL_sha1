@@ -78,6 +78,10 @@ For a wider range of tests, the results are as follows.
 | Solidity (opt)| 56254  | 132516    | 556667    | 38.4k        |
 | Overhead      | 21542  | 29838     | 79610     |              |
 
+Compiler versions,
+  * solc: 0.4.19-develop.2017.10.27+commit.59d4dfbd.Linux.g++
+  * lllc: 0.4.19-develop.2017.10.27+commit.59d4dfbd.Linux.g++
+
 The "per 512 bit block" figures are simply the difference between a run with 128 bytes of input and a run with 64 bytes of input.
 
 The "overhead" line is the unavoidable cost of (1) 21000 gas for the contract call, plus (2) the cost of the call data transfer - roughly 474 + N * 68 gas, where N is the length in bytes of the test string. This overhead is the same for all the contracts.
