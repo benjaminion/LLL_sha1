@@ -4,7 +4,7 @@ For background on LLL see [here](https://github.com/benjaminion/LLL_erc20#introd
 
 To achieve "close to the metal" EVM performance, Solidity programmers will sometimes reach for assembly language. This is designed to take away the worst of the pain of stack management and jump management while avoiding the overheads of high level languages.
 
-The premise of LLL is that it is similarly able to achieve near-native code performance, with the advantage over assembly language of providing a powerful macro capability that can dramatically improve code readbility and maintainability.
+The premise of LLL is that it is similarly able to achieve near-native code performance, with the advantage over assembly language of providing a powerful macro capability that can dramatically improve code readability and maintainability.
 
 As an exercise in exploring and comparing these approaches, I've translated Nick Johnson's [Solidity SHA1](https://github.com/Arachnid/solsha1) assembly code to LLL. It's essentially a one-to-one transposition.
 
@@ -102,4 +102,4 @@ These gains are, however, quite temporary. Every one of the `exp` operations in 
   * The unoptimised LLL performance is no worse than the unoptimised Solidity assembly code, and a little better for large inputs.
   * It would definitely be good to revisit this exercise once EIP-145 is deployed. There should be a huge performance improvement for both codes.
   * It would be excellent if LLL were available as an alternative to inline assembly within Solidity contracts. I don't think this would be *too* hard to implement.
-  
+
